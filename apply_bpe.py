@@ -26,7 +26,7 @@ argparse.open = open
 
 class BPE(object):
 
-    def __init__(self, codes, separator='@@', vocab=None, glossaries=None):
+    def __init__(self, codes, separator='@@', vocab=None, glossaries=None, rglossaries=None):
 
         # check version information
         firstline = codes.readline()
@@ -48,20 +48,35 @@ class BPE(object):
         self.vocab = vocab
 
         self.glossaries = glossaries if glossaries else []
+        self.rglossaries = rglossaries if rglossaries else []
+        relist = [re.escape(x) for x in self.glossaries] + self.rglossaries
+        if len(relist):
+            retext = '(%s)' % '|'.join(relist)
+            sys.stderr.write('glossaries re: %s\n' % retext)
+            self.glossary_re = re.compile(retext)
+        else:
+            self.glossary_re = None
+
 
     def segment(self, sentence):
         """segment single sentence (whitespace-tokenized string) with BPE encoding"""
         output = []
+        isolated = False
         for word in sentence.split():
-            new_word = [out for segment in self._isolate_glossaries(word)
-                        for out in encode(segment,
-                                          self.bpe_codes,
-                                          self.bpe_codes_reverse,
-                                          self.vocab,
-                                          self.separator,
-                                          self.version,
-                                          self.glossaries)]
-
+            new_word = []
+            for segment in self._isolate_glossaries(word):
+                if len(segment):
+                    if isolated:
+                        new_word.append(segment)
+                        sys.stderr.write('glossarized segment (leaving alone): %s\n' % segment)
+                    else:
+                        new_word += encode(segment,
+                                              self.bpe_codes,
+                                              self.bpe_codes_reverse,
+                                              self.vocab,
+                                              self.separator,
+                                              self.version)
+                isolated = not isolated
             for item in new_word[:-1]:
                 output.append(item + self.separator)
             output.append(new_word[-1])
@@ -69,11 +84,16 @@ class BPE(object):
         return ' '.join(output)
 
     def _isolate_glossaries(self, word):
-        word_segments = [word]
-        for gloss in self.glossaries:
-            word_segments = [out_segments for segment in word_segments
-                                 for out_segments in isolate_glossary(segment, gloss)]
-        return word_segments
+        """
+        Isolate a glossary present inside a word.
+
+        Returns a list of subwords. In which all 'glossary' glossaries are isolated
+
+        For example, if 'USA' is the glossary and '1934USABUSA' the word, the return value is:
+            ['1934', 'USA', 'B', 'USA']
+        """
+        gre = self.glossary_re
+        return [word] if gre is None else gre.split(word)
 
 def create_parser():
     parser = argparse.ArgumentParser(
@@ -108,6 +128,11 @@ def create_parser():
         metavar="STR",
         help="Glossaries. The strings provided in glossaries will not be affected"+
              "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords")
+    parser.add_argument(
+        '--rglossaries', type=str, nargs='+', default=None,
+        metavar="REGEX",
+        help="Glossaries. The (python 're') regexes provided in glossaries will not be affected"+
+             "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords")
 
     return parser
 
@@ -123,16 +148,12 @@ def get_pairs(word):
         prev_char = char
     return pairs
 
-def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, glossaries=None, cache={}):
+def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache={}):
     """Encode word based on list of BPE merge operations, which are applied consecutively
     """
 
     if orig in cache:
         return cache[orig]
-
-    if orig in glossaries:
-        cache[orig] = (orig,)
-        return (orig,)
 
     if version == (0, 1):
         word = tuple(orig) + ('</w>',)
@@ -253,33 +274,17 @@ def read_vocabulary(vocab_file, threshold):
 
     return vocabulary
 
-def isolate_glossary(word, glossary):
-    """
-    Isolate a glossary present inside a word.
-
-    Returns a list of subwords. In which all 'glossary' glossaries are isolated 
-
-    For example, if 'USA' is the glossary and '1934USABUSA' the word, the return value is:
-        ['1934', 'USA', 'B', 'USA']
-    """
-    if word == glossary or glossary not in word:
-        return [word]
-    else:
-        splits = word.split(glossary)
-        segments = [segment.strip() for split in splits[:-1] for segment in [split, glossary] if segment != '']
-        return segments + [splits[-1].strip()] if splits[-1] != '' else segments
-
 if __name__ == '__main__':
-
+    if False:
     # python 2/3 compatibility
-    if sys.version_info < (3, 0):
-        sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
-        sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
-        sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
-    else:
-        sys.stderr = codecs.getwriter('UTF-8')(sys.stderr.buffer)
-        sys.stdout = codecs.getwriter('UTF-8')(sys.stdout.buffer)
-        sys.stdin = codecs.getreader('UTF-8')(sys.stdin.buffer)
+      if sys.version_info < (3, 0):
+          sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
+          sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
+          sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
+      else:
+          sys.stderr = codecs.getwriter('UTF-8')(sys.stderr.buffer)
+          sys.stdout = codecs.getwriter('UTF-8')(sys.stdout.buffer)
+          sys.stdin = codecs.getreader('UTF-8')(sys.stdin.buffer)
 
     parser = create_parser()
     args = parser.parse_args()
@@ -298,7 +303,7 @@ if __name__ == '__main__':
     else:
         vocabulary = None
 
-    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries)
+    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries, args.rglossaries)
 
     for line in args.input:
         args.output.write(bpe.segment(line).strip())
