@@ -18,8 +18,9 @@ class TestBPEIsolateGlossariesMethod(unittest.TestCase):
 
         amock = mock.MagicMock()
         amock.readline.return_value = 'something'
-        glossaries = ['like', 'Manuel', 'USA']
-        self.bpe = BPE(amock, glossaries=glossaries)
+        glossaries = ['like', 'USA']
+        rglossaries = ['M[Manuel]*l']
+        self.bpe = BPE(amock, glossaries=glossaries, rglossaries=rglossaries)
 
     def _run_test_case(self, test_case):
         orig, expected = test_case
@@ -27,8 +28,8 @@ class TestBPEIsolateGlossariesMethod(unittest.TestCase):
         self.assertEqual(out, expected)
 
     def test_multiple_glossaries(self):
-        orig = 'wordlikeUSAwordManuelManuelwordUSA'
-        exp = ['word', 'like', '', 'USA', 'word', 'Manuel', '', 'Manuel', 'word', 'USA', '']
+        orig = 'wordlikeManuelUSAwordManuelManuelwordUSA'
+        exp = ['word', 'like', '', 'Manuel', '', 'USA', 'word', 'ManuelManuel', 'word', 'USA', '']
         test_case = (orig, exp)
         self._run_test_case(test_case)
 

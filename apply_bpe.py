@@ -132,7 +132,8 @@ def create_parser():
         '--rglossaries', type=str, nargs='+', default=None,
         metavar="REGEX",
         help="Glossaries. The (python 're') regexes provided in glossaries will not be affected"+
-             "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords")
+             "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords."+ "If glossaries/rglossaries are ambiguous, know that they form a single regexp (glossaries ..."+ "rglossaries) in that order, and are resolved by re.split (so probably winner is "+
+             "earliest-in-string match with ties broken by earliest-in-list.")
 
     return parser
 
