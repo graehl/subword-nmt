@@ -61,14 +61,14 @@ class BPE(object):
     def segment(self, sentence):
         """segment single sentence (whitespace-tokenized string) with BPE encoding"""
         output = []
-        isolated = False
         for word in sentence.split():
             new_word = []
+            isolated = False
             for segment in self._isolate_glossaries(word):
                 if len(segment):
                     if isolated:
                         new_word.append(segment)
-                        sys.stderr.write('glossarized segment (leaving alone): %s\n' % segment)
+                        sys.stderr.write('glossarized segment (leaving alone): "%s"\n' % segment)
                     else:
                         new_word += encode(segment,
                                               self.bpe_codes,
@@ -77,10 +77,12 @@ class BPE(object):
                                               self.separator,
                                               self.version)
                 isolated = not isolated
-            for item in new_word[:-1]:
-                output.append(item + self.separator)
-            output.append(new_word[-1])
-
+            remain = len(new_word)
+            sep = self.separator
+            for item in new_word:
+                remain -= 1
+                if remain == 0: sep = ''
+                output.append(item + sep)
         return ' '.join(output)
 
     def _isolate_glossaries(self, word):
@@ -276,7 +278,7 @@ def read_vocabulary(vocab_file, threshold):
     return vocabulary
 
 if __name__ == '__main__':
-    if False:
+    if True:
     # python 2/3 compatibility
       if sys.version_info < (3, 0):
           sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
