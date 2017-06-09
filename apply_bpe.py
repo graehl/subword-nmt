@@ -57,6 +57,7 @@ class BPE(object):
         else:
             self.glossary_re = None
 
+        self.cache = {}
 
     def segment(self, sentence):
         """segment single sentence (whitespace-tokenized string) with BPE encoding"""
@@ -75,7 +76,8 @@ class BPE(object):
                                               self.bpe_codes_reverse,
                                               self.vocab,
                                               self.separator,
-                                              self.version)
+                                              self.version,
+                                              self.cache)
                 isolated = not isolated
             remain = len(new_word)
             sep = self.separator
@@ -151,7 +153,7 @@ def get_pairs(word):
         prev_char = char
     return pairs
 
-def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache={}):
+def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache):
     """Encode word based on list of BPE merge operations, which are applied consecutively
     """
 
