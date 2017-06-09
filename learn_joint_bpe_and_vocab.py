@@ -15,10 +15,8 @@ Proceedings of the 54th Annual Meeting of the Association for Computational Ling
 from __future__ import unicode_literals
 
 import sys
-import os
 import codecs
 import argparse
-import tempfile
 from collections import Counter
 
 import learn_bpe
@@ -48,7 +46,7 @@ def create_parser():
         '--separator', type=str, default='@@', metavar='STR',
         help="Separator between non-final subword units (default: '%(default)s'))")
     parser.add_argument(
-        '--write-vocabulary', type=argparse.FileType('w'), nargs = '+', default=None,
+        '--write-vocabulary', '-w', type=argparse.FileType('w'), nargs = '+', default=None,
         metavar='PATH', dest='vocab',
         help='Write to these vocabulary files after applying BPE. One per input text. Used for filtering in apply_bpe.py')
     parser.add_argument(
@@ -59,7 +57,6 @@ def create_parser():
         help="verbose mode.")
 
     return parser
-
 
 
 if __name__ == '__main__':
@@ -99,27 +96,5 @@ if __name__ == '__main__':
 
     with codecs.open(args.output.name, encoding='UTF-8') as codes:
         bpe = apply_bpe.BPE(codes, args.separator, None)
-
-    # apply BPE to each training corpus and get vocabulary
-    for train_file, vocab_file in zip(args.input, args.vocab):
-
-        tmp = tempfile.NamedTemporaryFile(delete=False)
-        tmp.close()
-
-        tmpout = codecs.open(tmp.name, 'w', encoding='UTF-8')
-
-        train_file.seek(0)
-        for line in train_file:
-            tmpout.write(bpe.segment(line).strip())
-            tmpout.write('\n')
-
-        tmpout.close()
-        tmpin = codecs.open(tmp.name, encoding='UTF-8')
-
-        vocab = learn_bpe.get_vocabulary(tmpin)
-        tmpin.close()
-        os.remove(tmp.name)
-
-        for key, freq in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
-            vocab_file.write("{0} {1}\n".format(key, freq))
-        vocab_file.close()
+        # apply BPE to each training corpus and get vocabulary
+        learn_bpe.make_vocabularies(bpe, args.input, args.vocab)
