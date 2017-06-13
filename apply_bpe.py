@@ -63,29 +63,34 @@ class BPE(object):
         """segment single sentence (whitespace-tokenized string) with BPE encoding"""
         output = []
         for word in sentence.split():
-            new_word = []
-            isolated = False
-            for segment in self._isolate_glossaries(word):
-                if len(segment):
-                    if isolated:
-                        new_word.append(segment)
-                        sys.stderr.write('glossarized segment (leaving alone): "%s"\n' % segment)
-                    else:
-                        new_word += encode(segment,
-                                              self.bpe_codes,
-                                              self.bpe_codes_reverse,
-                                              self.vocab,
-                                              self.separator,
-                                              self.version,
-                                              self.cache)
-                isolated = not isolated
-            remain = len(new_word)
-            sep = self.separator
-            for item in new_word:
-                remain -= 1
-                if remain == 0: sep = ''
-                output.append(item + sep)
+            self.pieces(word, output)
         return ' '.join(output)
+
+    def pieces(self, word, output=None):
+        if output is None: output = []
+        new_word = []
+        isolated = False
+        for segment in self._isolate_glossaries(word):
+            if len(segment):
+                if isolated:
+                    new_word.append(segment)
+                    sys.stderr.write('glossarized segment (leaving alone): "%s"\n' % segment)
+                else:
+                    new_word += encode(segment,
+                                          self.bpe_codes,
+                                          self.bpe_codes_reverse,
+                                          self.vocab,
+                                          self.separator,
+                                          self.version,
+                                          self.cache)
+            isolated = not isolated
+        remain = len(new_word)
+        sep = self.separator
+        for item in new_word:
+            remain -= 1
+            if remain == 0: sep = ''
+            output.append(item + sep)
+        return output
 
     def _isolate_glossaries(self, word):
         """
@@ -124,7 +129,7 @@ def create_parser():
         metavar="PATH",
         help="Vocabulary file (built with get_vocab.py). If provided, this script reverts any merge operations that produce an OOV.")
     parser.add_argument(
-        '--vocabulary-threshold', type=int, default=None,
+        '--vocabulary-threshold', type=int, default=1,
         metavar="INT",
         help="Vocabulary threshold. If vocabulary is provided, any word with frequency < threshold will be treated as OOV")
     parser.add_argument(
@@ -265,7 +270,7 @@ def check_vocab_and_split(orig, bpe_codes, vocab, separator):
     return out
 
 
-def read_vocabulary(vocab_file, threshold):
+def read_vocabulary(vocab_file, threshold=1):
     """read vocabulary file produced by get_vocab.py, and filter according to frequency threshold.
     """
 
@@ -273,8 +278,7 @@ def read_vocabulary(vocab_file, threshold):
 
     for line in vocab_file:
         word, freq = line.split()
-        freq = int(freq)
-        if threshold == None or freq >= threshold:
+        if int(freq) >= threshold:
             vocabulary.add(word)
 
     return vocabulary

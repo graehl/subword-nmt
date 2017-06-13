@@ -28,6 +28,8 @@ argparse.open = open
 
 import apply_bpe
 
+versionheaderbegin = '#version: '
+
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -42,6 +44,11 @@ def create_parser():
         '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
         metavar='PATH',
         help="Output file for BPE codes (default: standard output)")
+    parser.add_argument('--forcecodes', '-f', default=None, metavar='PATH',
+                           help='apply these merges (--output from another learn_bpe.py) first')
+    parser.add_argument('--grepforcecodes', '-g', default=None, metavar='RE',
+                           help="use only --forcecodes A B parts that both whole-string match this regexp"
+                                "(not counting any </w> at end of B which is always allowed) e.g. [0-9]+")
     parser.add_argument(
         '--symbols', '-s', type=int, default=10000,
         help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
@@ -52,6 +59,8 @@ def create_parser():
         help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
     parser.add_argument('--dict-input', action="store_true",
         help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
+    parser.add_argument(
+        '--min-count,', '-c', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
     parser.add_argument(
         '--write-vocabulary', '-w', type=argparse.FileType('w'), nargs = '+', default=None,
         metavar='PATH', dest='vocab',
@@ -65,17 +74,22 @@ def create_parser():
 
     return parser
 
-def get_vocabulary(fobj, is_dict=False):
+def get_vocabulary(fobj, is_dict=False, mincount=1):
     """Read text and return dictionary that encodes vocabulary
     """
     vocab = Counter()
     for line in fobj:
         if is_dict:
             word, count = line.strip().split()
-            vocab[word] = int(count)
+            c = int(count)
+            if c < mincount:
+                break
+            vocab[word] = c
         else:
             for word in line.split():
                 vocab[word] += 1
+    if mincount > 1 and not is_dict:
+        return dict((x,y) for x,y in vocab.items() if y >= mincount)
     return vocab
 
 def write_vocabulary(vocab, vocab_file):
@@ -83,26 +97,27 @@ def write_vocabulary(vocab, vocab_file):
         vocab_file.write("{0} {1}\n".format(key, freq))
 
 def make_vocabularies(bpe, inputfiles, vocabfiles):
-    for train_file, vocab_file in zip(inputfiles, vocabfiles):
+    for train, vocab_file in zip(inputfiles, vocabfiles):
+        if isinstance(train, Counter):
+            vocab = Counter()
+            for w, c in train:
+                for sw in bpe.pieces(w):
+                    vocab[sw] += c
+        else:
+            tmp = tempfile.NamedTemporaryFile(delete=False)
+            tmp.close()
+            tmpout = codecs.open(tmp.name, 'w', encoding='UTF-8')
+            train.seek(0)
+            for line in train:
+                tmpout.write(bpe.segment(line).strip())
+                tmpout.write('\n')
 
-        tmp = tempfile.NamedTemporaryFile(delete=False)
-        tmp.close()
-
-        tmpout = codecs.open(tmp.name, 'w', encoding='UTF-8')
-
-        train_file.seek(0)
-        for line in train_file:
-            tmpout.write(bpe.segment(line).strip())
-            tmpout.write('\n')
-
-        tmpout.close()
-        tmpin = codecs.open(tmp.name, encoding='UTF-8')
-
-        write_vocabulary(get_vocabulary(tmpin), vocab_file)
-        tmpin.close()
-
-        os.remove(tmp.name)
-
+            tmpout.close()
+            tmpin = codecs.open(tmp.name, encoding='UTF-8')
+            vocab = get_vocabulary(tmpin)
+            tmpin.close()
+            os.remove(tmp.name)
+        write_vocabulary(vocab, vocab_file)
         vocab_file.close()
 
 def update_pair_statistics(pair, changed, stats, indices):
@@ -207,11 +222,18 @@ def replace_pair(pair, vocab, indices):
 
     return changes
 
+
+def do_pair(most_frequent, outfile, sorted_vocab, indices, stats):
+    outfile.write('{0} {1}\n'.format(*most_frequent))
+    update_pair_statistics(most_frequent, replace_pair(most_frequent, sorted_vocab, indices), stats, indices)
+    stats[most_frequent] = 0
+
+
 def prune_stats(stats, big_stats, threshold):
     """Prune statistics dict for efficiency of max()
 
     The frequency of a symbol pair never increases, so pruning is generally safe
-    (until we the most frequent pair is less frequent than a pair we previously pruned)
+    (until the most frequent pair is less frequent than a pair we previously pruned)
     big_stats keeps full statistics for when we need to access pruned items
     """
     for item,freq in list(stats.items()):
@@ -223,15 +245,15 @@ def prune_stats(stats, big_stats, threshold):
                 big_stats[item] = freq
 
 
-def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, version01=False):
+def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, version01=False, forcecodes=None, grepforcecodes=None, mincount=1):
     """Learn num_symbols BPE operations from vocabulary, and write to outfile.
     """
 
     # version 0.2 changes the handling of the end-of-word token ('</w>');
     # version numbering allows bckward compatibility
-    outfile.write('#version: %s\n' % ('0.1' if version01 else '0.2'))
+    outfile.write('%s%s\n' % (versionheaderbegin, '0.1' if version01 else '0.2'))
 
-    vocab = get_vocabulary(infile, is_dict)
+    vocab = infile if isinstance(infile, Counter) else get_vocabulary(infile, is_dict)
     endword = '</w>'
     vocab = dict([(tuple(x)+(endword,) if version01 else tuple(x[:-1])+(x[-1]+endword,) , y) for (x,y) in vocab.items()])
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
@@ -240,6 +262,34 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
     big_stats = copy.deepcopy(stats)
     # threshold is inspired by Zipfian assumption, but should only affect speed
     threshold = max(stats.values()) / 10
+    ncodes = 0
+    if forcecodes is not None:
+        grep = grepforcecodes
+        def matchcode(pair, grep):
+            return True if grep is None else grep.match(pair[0]) and grep.match(pair[1])
+        if grep is not None:
+            if isinstance(grep, str):
+                if not grep.startswith('^'):
+                    grep = r'^' + grep
+                grep = grep + '(</w>)?'
+                if not grep.endswith('$'):
+                    grep = grep + r'$'
+                sys.stderr.write("using only forcecodes lines matching r'%s' ...\n" % grep)
+                grep = re.compile(grep)
+        first = True
+        stats = dict()
+        for line in forcecodes:
+            if not (first and line.startswith(versionheaderbegin)):
+                a, b = line.strip().split()
+                pair = (a, b)
+                if matchcode(pair, grep):
+                    if verbose and grep:
+                        sys.stderr.write("grepforcecodes: %s %s\n" % pair)
+                    do_pair(pair, outfile, sorted_vocab, indices, big_stats)
+                    ncodes += 1
+            first = False
+        sys.stderr.write("forcecodes: added an additional %s --forcecodes\n (in addition to --num-symbols=%s)\n" % (ncodes, num_symbols))
+
     for i in range(num_symbols):
         if stats:
             most_frequent = max(stats, key=lambda x: (stats[x], x))
@@ -259,12 +309,11 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
 
         if verbose:
             sys.stderr.write('pair {0}: {1} {2} -> {1}{2} (frequency {3})\n'.format(i, most_frequent[0], most_frequent[1], stats[most_frequent]))
-        outfile.write('{0} {1}\n'.format(*most_frequent))
-        changes = replace_pair(most_frequent, sorted_vocab, indices)
-        update_pair_statistics(most_frequent, changes, stats, indices)
-        stats[most_frequent] = 0
+        do_pair(most_frequent, outfile, sorted_vocab, indices, stats)
+        ncodes += 1
         if not i % 100:
             prune_stats(stats, big_stats, threshold)
+    sys.stderr.write("bpe codes has %s pairs\n" % (ncodes,))
 
 
 if __name__ == '__main__':
@@ -288,7 +337,11 @@ if __name__ == '__main__':
     if args.output.name != '<stdout>':
         args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
 
-    main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input, version01=args.version01)
+    forcecodes = None
+    if args.forcecodes is not None:
+        forcecodes = codecs.open(args.forcecodes, encoding='UTF-8')
+
+    main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input, version01=args.version01, forcecodes=forcecodes, grepforcecodes=args.grepforcecodes, mincount=args.mincount)
     if len(args.vocab):
         with codecs.open(args.output.name, encoding='UTF-8') as codes:
             bpe = apply_bpe.BPE(codes, args.separator, None)

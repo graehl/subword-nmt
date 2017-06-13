@@ -7,7 +7,8 @@ c = Counter()
 
 for line in sys.stdin:
     for word in line.split():
-        c[word] += 1
+        if len(word):
+            c[word] += 1
 
-for key,f in sorted(c.items(), key=lambda x: x[1], reverse=True):
+for key,f in c.most_common():
     print(key+" "+ str(f))

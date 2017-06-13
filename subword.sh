@@ -9,9 +9,8 @@ tokenize() {
     fi
 }
 vars() {
-    echo "${sep:=__LW_SW__} ${subword_ops:=50000} ${subword_unk:=40} ${subword_prefix:=${subword_dir:-`dirname $0`}/subword} ${subword_outdir:=} ${exclude_bpe_basename:=1}" 1>&2
+    echo "${sep:=__LW_SW__} ${subwords:=80000} ${mincount:=2} ${minfreq:=20} ${unkfreq:=2} ${subword_prefix:=${subword_dir:-`dirname $0`}/subword} ${subword_outdir:=} ${exclude_bpe_basename:=1} ${dict_input}" 1>&2
     codes=$subword_prefix.codes
-    set -x
 }
 skipbpe() {
     [[ $exclude_bpe_basename ]] && basename "$1" | fgrep -q .bpe
@@ -23,7 +22,7 @@ vocab() {
     echo "${subword_prefix}.$1.vcb"
 }
 lang() {
-    basename "$1" | awk -F "." '{print $NF}'
+    basename "$1" | awk -F "." '{print $2}'
 }
 create() {
     vocabs=""
@@ -33,8 +32,11 @@ create() {
     done
     ln -sf `absp $0` $subword_prefix
     codebase=$codes
+    if [[ $dict_input ]]  ; then
+        dictinputarg=" --dict-input"
+    fi
     if [[ $joint ]] ; then
-        python $d/learn_joint_bpe_and_vocab.py --input "$@" --separator $sep -s $subword_ops -o $codes --write-vocabulary $vocabs $versionarg
+        python $d/learn_joint_bpe_and_vocab.py --input "$@" --separator $sep -s $subwords -o $codes --write-vocabulary $vocabs $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
         apply "$@"
         for f in "$@"; do
             l=`lang "$f"`
@@ -49,7 +51,7 @@ create() {
             vocab=$(vocab $l)
             codes=$codebase.$l
             ls -l $code $vocab
-            python $d/learn_bpe.py --input "$f" --separator $sep -s $subword_ops -o $codes --write-vocabulary $vocab $versionarg
+            python $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount
             versionarg=$versionarg1
             apply "$f"
         done
@@ -64,13 +66,13 @@ apply() {
             [[ $subword_outdir ]] || subword_outdir=`dirname "$f"`
             fto="$subword_outdir/$fb.bpe.$l"
             echo $fto
-            cat "$f" | lang=$l tokenizer | python -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $subword_unk > $fto
+            cat "$f" | lang=$l tokenizer | python -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $unkfreq > $fto
         fi
     done
 }
 joint=1
-        versionarg0=
-        versionarg1=
+versionarg0=
+versionarg1=
 case $1 in
     *01)
             joint=
@@ -90,9 +92,12 @@ case $1 in
 esac
 case $1 in
     -h*)
-        echo 'usage: subword_prefix=/tmp/subword subword_ops=32000 subword_unk=50 $0 [-c] a.l1 b.l2'
+        echo 'usage: subword_prefix=/tmp/subword subwords=32000 minfreq=50 $0 [-c] a.l1 b.l2'
         ;;
     -c*)
+        if [[ ${1%v} != $1 ]] ; then
+            dict_input=1
+        fi
         subword_dir=${subword_dir:-.}
         vars
         shift

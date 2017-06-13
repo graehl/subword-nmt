@@ -55,6 +55,10 @@ def create_parser():
     parser.add_argument(
         '--verbose', '-v', action="store_true",
         help="verbose mode.")
+    parser.add_argument(
+        '--min-count,', '-c', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
+    parser.add_argument('--dict-input', action="store_true",
+        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
 
     return parser
 
@@ -85,14 +89,12 @@ if __name__ == '__main__':
     # get combined vocabulary of all input texts
     full_vocab = Counter()
     for f in args.input:
-        full_vocab += learn_bpe.get_vocabulary(f)
+        full_vocab += learn_bpe.get_vocabulary(f, args.dict_input, args.mincount)
         f.seek(0)
-
-    vocab_list = ['{0} {1}'.format(key, freq) for (key, freq) in full_vocab.items()]
 
     # learn BPE on combined vocabulary
     with codecs.open(args.output.name, 'w', encoding='UTF-8') as output:
-        learn_bpe.main(vocab_list, output, args.symbols, args.min_frequency, args.verbose, is_dict=True)
+        learn_bpe.main(full_vocab, output, args.symbols, args.min_frequency, args.verbose, is_dict=True, mincount=args.mincount)
 
     with codecs.open(args.output.name, encoding='UTF-8') as codes:
         bpe = apply_bpe.BPE(codes, args.separator, None)
