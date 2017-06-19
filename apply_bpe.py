@@ -24,15 +24,50 @@ from collections import defaultdict
 from io import open
 argparse.open = open
 
+endword='</w>'
+
+def log(s,out=sys.stderr):
+    out.write("### %s\n" % (s,))
+
+def written(x, sep=''):
+    return x[:-4] if x.endswith(endword) else x + sep
+
+def stripend(x):
+    return x[:-4] if x.endswith(endword) else x
+
+
+versionheaderbegin = '#version: '
+
+
+def write_pair(pair, out):
+    out.write("%s %s\n"%pair)
+
+def write2(a, b, out):
+    out.write("%s %s\n"%(a, b))
+
+def write_header(outfile, version):
+    outfile.write('%s%s.%s\n' % (versionheaderbegin, version[0], version[1]))
+
+
+def version_line(line):
+    return line.startswith(versionheaderbegin)
+
+
+def maybe_header_version(line):
+    if version_line(line):
+        return tuple(int(x) for x in line[len(versionheaderbegin):].split("."))
+    else:
+        return None
+
+
 class BPE(object):
 
     def __init__(self, codes, separator='@@', vocab=None, glossaries=None, rglossaries=None):
 
         # check version information
         firstline = codes.readline()
-        if firstline.startswith('#version:'):
-            self.version = tuple([int(x) for x in re.sub(r'(\.0+)*$','', firstline.split()[-1]).split(".")])
-        else:
+        self.version = maybe_header_version(firstline)
+        if self.version is None:
             self.version = (0, 1)
             codes.seek(0)
 
@@ -58,6 +93,35 @@ class BPE(object):
             self.glossary_re = None
 
         self.cache = {}
+
+    def ordered_codes(self):
+        return sorted(self.bpe_codes.items(), key=lambda x: x[1])
+
+    def prereqs(self, vocab, seen=None):
+        if seen is None: seen=set()
+        def prereqs2(s, pair):
+            seen.add(s)
+            prereqs(pair[0])
+            prereqs(pair[1])
+        def prereqs(s):
+            if len(s) > 1 and s not in seen:
+                seen.add(s)
+                pair = self.bpe_codes_reverse.get(s, None)
+                if pair is not None:
+                    prereqs2(s, pair)
+        for ab, pair in self.bpe_codes_reverse.items():
+            if written(ab, self.separator) in vocab:
+                prereqs2(ab, pair)
+        return seen
+
+    def write_subset(self, out, bpevocab, pre=None):
+        """only include merges that are useful to reach vocab"""
+        write_header(out, self.version)
+        if pre is None: pre = self.prereqs(bpevocab)
+        for pair,_ in self.ordered_codes():
+            ab = pair[0] + pair[1]
+            if written(ab, self.separator) in bpevocab or ab in pre:
+                write_pair(pair, out)
 
     def segment(self, sentence):
         """segment single sentence (whitespace-tokenized string) with BPE encoding"""
@@ -104,6 +168,7 @@ class BPE(object):
         gre = self.glossary_re
         return [word] if gre is None else gre.split(word)
 
+
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -127,7 +192,7 @@ def create_parser():
     parser.add_argument(
         '--vocabulary', type=argparse.FileType('r'), default=None,
         metavar="PATH",
-        help="Vocabulary file (built with get_vocab.py). If provided, this script reverts any merge operations that produce an OOV.")
+        help="Vocabulary file (built with get_vocab.py). If provided, split up subword units until they're in this vocabulary.")
     parser.add_argument(
         '--vocabulary-threshold', type=int, default=1,
         metavar="INT",
@@ -146,6 +211,7 @@ def create_parser():
 
     return parser
 
+
 def get_pairs(word):
     """Return set of symbol pairs in a word.
 
@@ -158,6 +224,7 @@ def get_pairs(word):
         prev_char = char
     return pairs
 
+
 def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache):
     """Encode word based on list of BPE merge operations, which are applied consecutively
     """
@@ -166,9 +233,9 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache)
         return cache[orig]
 
     if version == (0, 1):
-        word = tuple(orig) + ('</w>',)
+        word = tuple(orig) + (endword,)
     elif version == (0, 2): # more consistent handling of word-final segments
-        word = tuple(orig[:-1]) + ( orig[-1] + '</w>',)
+        word = tuple(orig[:-1]) + ( orig[-1] + endword,)
     else:
         raise NotImplementedError
 
@@ -185,6 +252,7 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache)
         new_word = []
         i = 0
         while i < len(word):
+            # replace bigram everywhere in word
             try:
                 j = word.index(first, i)
                 new_word.extend(word[i:j])
@@ -207,10 +275,10 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache)
             pairs = get_pairs(word)
 
     # don't print end-of-word symbols
-    if word[-1] == '</w>':
+    if word[-1] == endword:
         word = word[:-1]
-    elif word[-1].endswith('</w>'):
-        word = word[:-1] + (word[-1].replace('</w>',''),)
+    elif word[-1].endswith(endword):
+        word = word[:-1] + (word[-1].replace(endword,''),)
 
     if vocab:
         word = check_vocab_and_split(word, bpe_codes_reverse, vocab, separator)
@@ -218,13 +286,14 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache)
     cache[orig] = word
     return word
 
+
 def recursive_split(segment, bpe_codes, vocab, separator, final=False):
     """Recursively split segment into smaller units (by reversing BPE merges)
     until all units are either in-vocabulary, or cannot be split futher."""
 
     try:
         if final:
-            left, right = bpe_codes[segment + '</w>']
+            left, right = bpe_codes[segment + endword]
             right = right[:-4]
         else:
             left, right = bpe_codes[segment]
@@ -244,6 +313,7 @@ def recursive_split(segment, bpe_codes, vocab, separator, final=False):
     else:
         for item in recursive_split(right, bpe_codes, vocab, separator, final):
             yield item
+
 
 def check_vocab_and_split(orig, bpe_codes, vocab, separator):
     """Check for each segment in word if it is in-vocabulary,

@@ -3,6 +3,7 @@ from __future__ import print_function
 import sys
 from collections import Counter
 
+
 c = Counter()
 
 for line in sys.stdin:

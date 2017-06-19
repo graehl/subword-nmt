@@ -1,5 +1,8 @@
 #!/bin/bash
-d=`dirname $0`
+realpath() {
+    readlink -nfs $(cd "$(dirname $1)"; pwd)/"$(basename $1)"
+}
+d=`dirname $(realpath $0)`
 set -e
 tokenize() {
     if [[ $tokenizer ]] ; then
@@ -8,7 +11,7 @@ tokenize() {
         cat
     fi
 }
-vars() {
+bpevars() {
     echo "${sep:=__LW_SW__} ${subwords:=80000} ${mincount:=2} ${minfreq:=20} ${unkfreq:=2} ${subword_prefix:=${subword_dir:-`dirname $0`}/subword} ${subword_outdir:=} ${exclude_bpe_basename:=1} ${dict_input}" 1>&2
     codes=$subword_prefix.codes
 }
@@ -50,12 +53,17 @@ create() {
             l=`lang "$f"`
             vocab=$(vocab $l)
             codes=$codebase.$l
-            ls -l $code $vocab
             python $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount
             versionarg=$versionarg1
+            ls -l $code $vocab
             apply "$f"
         done
     fi
+}
+bpevocab() {
+    vocab=$1
+    shift
+    python -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $unkfreq "$@"
 }
 apply() {
     for f in "$@"; do
@@ -66,7 +74,10 @@ apply() {
             [[ $subword_outdir ]] || subword_outdir=`dirname "$f"`
             fto="$subword_outdir/$fb.bpe.$l"
             echo $fto
-            cat "$f" | lang=$l tokenizer | python -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $unkfreq > $fto
+            (set -e
+            [[ -s $vocab ]]
+            cat "$f" | lang=$l tokenize | bpevocab $vocab > $fto
+            )
         fi
     done
 }
@@ -99,12 +110,12 @@ case $1 in
             dict_input=1
         fi
         subword_dir=${subword_dir:-.}
-        vars
+        bpevars
         shift
         create "$@"
         ;;
     *)
-        vars
+        bpevars
         apply "$@"
         ;;
 esac

@@ -28,8 +28,6 @@ argparse.open = open
 
 import apply_bpe
 
-versionheaderbegin = '#version: '
-
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -74,6 +72,7 @@ def create_parser():
 
     return parser
 
+
 def get_vocabulary(fobj, is_dict=False, mincount=1):
     """Read text and return dictionary that encodes vocabulary
     """
@@ -92,33 +91,26 @@ def get_vocabulary(fobj, is_dict=False, mincount=1):
         return dict((x,y) for x,y in vocab.items() if y >= mincount)
     return vocab
 
+
 def write_vocabulary(vocab, vocab_file):
     for key, freq in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
         vocab_file.write("{0} {1}\n".format(key, freq))
 
-def make_vocabularies(bpe, inputfiles, vocabfiles):
-    for train, vocab_file in zip(inputfiles, vocabfiles):
-        if isinstance(train, Counter):
-            vocab = Counter()
-            for w, c in train:
-                for sw in bpe.pieces(w):
-                    vocab[sw] += c
-        else:
-            tmp = tempfile.NamedTemporaryFile(delete=False)
-            tmp.close()
-            tmpout = codecs.open(tmp.name, 'w', encoding='UTF-8')
-            train.seek(0)
-            for line in train:
-                tmpout.write(bpe.segment(line).strip())
-                tmpout.write('\n')
 
-            tmpout.close()
-            tmpin = codecs.open(tmp.name, encoding='UTF-8')
-            vocab = get_vocabulary(tmpin)
-            tmpin.close()
-            os.remove(tmp.name)
-        write_vocabulary(vocab, vocab_file)
-        vocab_file.close()
+def restricted_vocabulary(bpe, restrict):
+    vocab = restrict if isinstance(restrict, Counter) else get_vocabulary(restrict)
+    bpevocab = Counter()
+    for w, c in vocab.items():
+        for sw in bpe.pieces(w):
+            bpevocab[sw] += c
+    return bpevocab
+
+
+def make_vocabularies(bpe, inputfiles, vocabfiles):
+    for restrict, outf in zip(inputfiles, vocabfiles):
+        write_vocabulary(restricted_vocabulary(bpe, restrict), outf)
+        outf.close()
+
 
 def update_pair_statistics(pair, changed, stats, indices):
     """Minimally update the indices and frequency of symbol pairs
@@ -251,12 +243,11 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
 
     # version 0.2 changes the handling of the end-of-word token ('</w>');
     # version numbering allows bckward compatibility
-    outfile.write('%s%s\n' % (versionheaderbegin, '0.1' if version01 else '0.2'))
+    apply_bpe.write_header(outfile, (0, 1 if version01 else 2))
 
     vocab = infile if isinstance(infile, Counter) else get_vocabulary(infile, is_dict)
     endword = '</w>'
-    vocab = dict([(tuple(x)+(endword,) if version01 else tuple(x[:-1])+(x[-1]+endword,) , y) for (x,y) in vocab.items()])
-    sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
+    sorted_vocab = sorted([(tuple(x)+(endword,) if version01 else tuple(x[:-1])+(x[-1]+endword,) , y) for (x,y) in vocab.items()], key=lambda x: x[1], reverse=True)
 
     stats, indices = get_pair_statistics(sorted_vocab)
     big_stats = copy.deepcopy(stats)
@@ -314,6 +305,7 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
         if not i % 100:
             prune_stats(stats, big_stats, threshold)
     sys.stderr.write("bpe codes has %s pairs\n" % (ncodes,))
+    return vocab
 
 
 if __name__ == '__main__':
@@ -341,9 +333,9 @@ if __name__ == '__main__':
     if args.forcecodes is not None:
         forcecodes = codecs.open(args.forcecodes, encoding='UTF-8')
 
-    main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input, version01=args.version01, forcecodes=forcecodes, grepforcecodes=args.grepforcecodes, mincount=args.mincount)
+    vocab = main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input, version01=args.version01, forcecodes=forcecodes, grepforcecodes=args.grepforcecodes, mincount=args.mincount)
     if len(args.vocab):
         with codecs.open(args.output.name, encoding='UTF-8') as codes:
             bpe = apply_bpe.BPE(codes, args.separator, None)
             # apply BPE to each training corpus and get vocabulary
-            make_vocabularies(bpe, args.input, args.vocab)
+            make_vocabularies(bpe, vocab, args.vocab)

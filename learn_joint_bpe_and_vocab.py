@@ -88,8 +88,11 @@ if __name__ == '__main__':
 
     # get combined vocabulary of all input texts
     full_vocab = Counter()
+    vocabs = []
     for f in args.input:
-        full_vocab += learn_bpe.get_vocabulary(f, args.dict_input, args.mincount)
+        v = learn_bpe.get_vocabulary(f, args.dict_input, args.mincount)
+        vocabs.append(v)
+        full_vocab += v
         f.seek(0)
 
     # learn BPE on combined vocabulary
@@ -99,4 +102,4 @@ if __name__ == '__main__':
     with codecs.open(args.output.name, encoding='UTF-8') as codes:
         bpe = apply_bpe.BPE(codes, args.separator, None)
         # apply BPE to each training corpus and get vocabulary
-        learn_bpe.make_vocabularies(bpe, args.input, args.vocab)
+        learn_bpe.make_vocabularies(bpe, vocabs, args.vocab)
