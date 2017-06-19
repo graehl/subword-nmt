@@ -24,10 +24,27 @@ from collections import defaultdict
 from io import open
 argparse.open = open
 
+def unicodeutf8(s):
+    return unicode(s, 'utf8') if type(s)==str else s
+
+def common_parser_arguments(parser):
+    parser.add_argument('--unkchar', type=unicodeutf8,
+                            default=u'\uFDEA', metavar='utf8',
+                            help="a unicode (utf8) codepoint character that will never participate in merges. default is U+FDEA (hex), a private noncharacter")
+    parser.add_argument(
+        '--separator', type=str, default='@@', metavar='STR',
+        help="Separator between non-final subword units (default: '%(default)s'))")
+    parser.add_argument('--unktag', type=str, default='<unk>', help='replace unkchar with this (utf8)')
+
 endword='</w>'
 
-def log(s,out=sys.stderr):
+verbose=0
+
+def log(s, out=sys.stderr):
     out.write("### %s\n" % (s,))
+
+def logv(v, s, out=sys.stderr):
+    if verbose >= v: log(s, out)
 
 def written(x, sep=''):
     return x[:-4] if x.endswith(endword) else x + sep
@@ -42,8 +59,10 @@ versionheaderbegin = '#version: '
 def write_pair(pair, out):
     out.write("%s %s\n"%pair)
 
+
 def write2(a, b, out):
     out.write("%s %s\n"%(a, b))
+
 
 def write_header(outfile, version):
     outfile.write('%s%s.%s\n' % (versionheaderbegin, version[0], version[1]))
@@ -62,14 +81,16 @@ def maybe_header_version(line):
 
 class BPE(object):
 
-    def __init__(self, codes, separator='@@', vocab=None, glossaries=None, rglossaries=None):
+    def __init__(self, codes, separator='@@', vocab=None, glossaries=None, rglossaries=None, unkchar=u'\uFDEA', unktag='<unk>'):
 
         # check version information
         firstline = codes.readline()
         self.version = maybe_header_version(firstline)
         if self.version is None:
+            log("no version header in %s"%codes)
             self.version = (0, 1)
             codes.seek(0)
+        log("version %s"%str(self.version))
 
         self.bpe_codes = [tuple(item.split()) for item in codes]
 
@@ -81,6 +102,9 @@ class BPE(object):
         self.separator = separator
 
         self.vocab = vocab
+
+        self.unktag = unktag
+        self.unkchar = unkchar
 
         self.glossaries = glossaries if glossaries else []
         self.rglossaries = rglossaries if rglossaries else []
@@ -146,7 +170,9 @@ class BPE(object):
                                           self.vocab,
                                           self.separator,
                                           self.version,
-                                          self.cache)
+                                          self.cache,
+                                          unkchar=self.unkchar,
+                                          unktag=self.unktag)
             isolated = not isolated
         remain = len(new_word)
         sep = self.separator
@@ -174,6 +200,7 @@ def create_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="learn BPE-based word segmentation")
 
+    common_parser_arguments(parser)
     parser.add_argument(
         '--input', '-i', type=argparse.FileType('r'), default=sys.stdin,
         metavar='PATH',
@@ -186,9 +213,6 @@ def create_parser():
         '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
         metavar='PATH',
         help="Output file (default: standard output)")
-    parser.add_argument(
-        '--separator', '-s', type=str, default='@@', metavar='STR',
-        help="Separator between non-final subword units (default: '%(default)s'))")
     parser.add_argument(
         '--vocabulary', type=argparse.FileType('r'), default=None,
         metavar="PATH",
@@ -208,6 +232,7 @@ def create_parser():
         help="Glossaries. The (python 're') regexes provided in glossaries will not be affected"+
              "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords."+ "If glossaries/rglossaries are ambiguous, know that they form a single regexp (glossaries ..."+ "rglossaries) in that order, and are resolved by re.split (so probably winner is "+
              "earliest-in-string match with ties broken by earliest-in-list.")
+    parser.add_argument('--verbose', '-v', type=int, default=0, help="higher = more ### stderr msgs")
 
     return parser
 
@@ -225,7 +250,7 @@ def get_pairs(word):
     return pairs
 
 
-def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache):
+def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache, unkchar=u'U', unktag='<unk>'):
     """Encode word based on list of BPE merge operations, which are applied consecutively
     """
 
@@ -280,7 +305,9 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache)
     elif word[-1].endswith(endword):
         word = word[:-1] + (word[-1].replace(endword,''),)
 
-    if vocab:
+    if unktag and word == unkchar:
+        word = unkword
+    elif vocab:
         word = check_vocab_and_split(word, bpe_codes_reverse, vocab, separator)
 
     cache[orig] = word
@@ -325,7 +352,7 @@ def check_vocab_and_split(orig, bpe_codes, vocab, separator):
         if segment + separator in vocab:
             out.append(segment)
         else:
-            #sys.stderr.write('OOV: {0}\n'.format(segment))
+            logv(1, 'OOV: {0}\n'.format(segment + separator))
             for item in recursive_split(segment, bpe_codes, vocab, separator, False):
                 out.append(item)
 
@@ -333,14 +360,14 @@ def check_vocab_and_split(orig, bpe_codes, vocab, separator):
     if segment in vocab:
         out.append(segment)
     else:
-        #sys.stderr.write('OOV: {0}\n'.format(segment))
+        logv(1, 'final OOV: {0}\n'.format(segment))
         for item in recursive_split(segment, bpe_codes, vocab, separator, True):
             out.append(item)
 
     return out
 
 
-def read_vocabulary(vocab_file, threshold=1):
+def read_vocabulary_set(vocab_file, threshold=1):
     """read vocabulary file produced by get_vocab.py, and filter according to frequency threshold.
     """
 
@@ -366,6 +393,7 @@ if __name__ == '__main__':
 
     parser = create_parser()
     args = parser.parse_args()
+    verbose = args.verbose
 
     # read/write files as UTF-8
     args.codes = codecs.open(args.codes.name, encoding='utf-8')
@@ -377,11 +405,11 @@ if __name__ == '__main__':
         args.vocabulary = codecs.open(args.vocabulary.name, encoding='utf-8')
 
     if args.vocabulary:
-        vocabulary = read_vocabulary(args.vocabulary, args.vocabulary_threshold)
+        vocabulary = read_vocabulary_set(args.vocabulary, args.vocabulary_threshold)
     else:
         vocabulary = None
 
-    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries, args.rglossaries)
+    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries, args.rglossaries, unkchar=args.unkchar, unktag=arcs.unktag)
 
     for line in args.input:
         args.output.write(bpe.segment(line).strip())

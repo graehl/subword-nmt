@@ -35,31 +35,7 @@ def create_parser():
         '--input', '-i', type=argparse.FileType('r'), required=True, nargs = '+',
         metavar='PATH',
         help="Input texts (multiple allowed).")
-    parser.add_argument(
-        '--output', '-o', type=argparse.FileType('w'), required=True,
-        metavar='PATH',
-        help="Output file for BPE codes.")
-    parser.add_argument(
-        '--symbols', '-s', type=int, default=10000,
-        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
-    parser.add_argument(
-        '--separator', type=str, default='@@', metavar='STR',
-        help="Separator between non-final subword units (default: '%(default)s'))")
-    parser.add_argument(
-        '--write-vocabulary', '-w', type=argparse.FileType('w'), nargs = '+', default=None,
-        metavar='PATH', dest='vocab',
-        help='Write to these vocabulary files after applying BPE. One per input text. Used for filtering in apply_bpe.py')
-    parser.add_argument(
-        '--min-frequency', type=int, default=2, metavar='FREQ',
-        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
-    parser.add_argument(
-        '--verbose', '-v', action="store_true",
-        help="verbose mode.")
-    parser.add_argument(
-        '--min-count,', '-c', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
-    parser.add_argument('--dict-input', action="store_true",
-        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
-
+    learn_bpe.common_parser_arguments(parser)
     return parser
 
 
@@ -97,7 +73,7 @@ if __name__ == '__main__':
 
     # learn BPE on combined vocabulary
     with codecs.open(args.output.name, 'w', encoding='UTF-8') as output:
-        learn_bpe.main(full_vocab, output, args.symbols, args.min_frequency, args.verbose, is_dict=True, mincount=args.mincount)
+        learn_bpe.main_args(args, full_vocab, output, is_dict=True)
 
     with codecs.open(args.output.name, encoding='UTF-8') as codes:
         bpe = apply_bpe.BPE(codes, args.separator, None)

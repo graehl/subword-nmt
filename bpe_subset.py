@@ -24,12 +24,14 @@ def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="create BPE-segmented vocabulary subset")
+
+    apply_bpe.common_parser_arguments(parser)
     parser.add_argument(
         '--input', '-i', type=argparse.FileType('r'), default=sys.stdin,
         metavar='PATH',
         help="running or vocab text input file (default: standard input).")
     parser.add_argument(
-        '--input-is-vocab', '-v', type=bool, dest='isvocab', default=True)
+        '--input-is-vocab', '-v', type=bool, dest='dict_input', default=True)
     parser.add_argument(
         '--codes', '-c', type=argparse.FileType('r'), metavar='PATH',
         required=True,
@@ -37,17 +39,14 @@ def create_parser():
     parser.add_argument(
         '--min-count,', '-m', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
     parser.add_argument(
-        '--separator', type=str, default='@@', metavar='STR',
-        help="Separator between non-final subword units (default: '%(default)s'))")
-    parser.add_argument(
         '--outcodes', '-o', type=argparse.FileType('w'), metavar='PATH', help="output vocabulary restricted bpe codes subset to this file")
     parser.add_argument('--bpevocab', '-b', type=argparse.FileType('w'), metavar='PATH', help="output bpe vocab (default: standard output")
     return parser
 
 def main(args):
-    vocab = learn_bpe.get_vocabulary(args.input, args.isvocab, args.mincount)
+    vocab = learn_bpe.get_vocabulary(args.input, args.dict_input, args.mincount)
     assert isinstance(vocab, Counter)
-    bpe = apply_bpe.BPE(args.codes, args.separator, None)
+    bpe = apply_bpe.BPE(args.codes, args.separator, vocab=None, unkchar=args.unkchar, unktag=args.unktag)
     bpevocab = learn_bpe.restricted_vocabulary(bpe, vocab)
     if args.bpevocab is not None: learn_bpe.write_vocabulary(bpevocab, args.bpevocab)
     if args.outcodes is not None: bpe.write_subset(args.outcodes, bpevocab)

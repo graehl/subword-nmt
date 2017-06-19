@@ -12,7 +12,7 @@ tokenize() {
     fi
 }
 bpevars() {
-    echo "${sep:=__LW_SW__} ${subwords:=80000} ${mincount:=2} ${minfreq:=20} ${unkfreq:=2} ${subword_prefix:=${subword_dir:-`dirname $0`}/subword} ${subword_outdir:=} ${exclude_bpe_basename:=1} ${dict_input}" 1>&2
+    echo "sep=${sep:=__LW_SW__} subwords=${subwords:=50000} mincount=${mincount:=2} minfreq=${minfreq:=20} unkfreq=${unkfreq:=2} subword_prefix=${subword_prefix:=${subword_dir:-`dirname $0`}/subword} ${subword_outdir:=} ${exclude_bpe_basename:=1} dict_input=${dict_input}" 1>&2
     codes=$subword_prefix.codes
 }
 skipbpe() {
@@ -39,12 +39,14 @@ create() {
         dictinputarg=" --dict-input"
     fi
     if [[ $joint ]] ; then
+        set -x
         python $d/learn_joint_bpe_and_vocab.py --input "$@" --separator $sep -s $subwords -o $codes --write-vocabulary $vocabs $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
-        apply "$@"
         for f in "$@"; do
             l=`lang "$f"`
             vocab=$(vocab $l)
-            apply "$f"
+            if [[ $applytoo ]] ; then
+                apply "$f"
+            fi
         done
         ls -l $codes $vocabs
     else
@@ -53,10 +55,12 @@ create() {
             l=`lang "$f"`
             vocab=$(vocab $l)
             codes=$codebase.$l
-            python $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount
+            python $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
             versionarg=$versionarg1
             ls -l $code $vocab
-            apply "$f"
+            if [[ $applytoo ]] ; then
+                apply "$f"
+            fi
         done
     fi
 }

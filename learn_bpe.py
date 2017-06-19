@@ -28,6 +28,43 @@ argparse.open = open
 
 import apply_bpe
 
+
+def maybe_hex_int(x):
+    return int(x, 0)
+
+
+def common_parser_arguments(parser):
+    apply_bpe.common_parser_arguments(parser)
+    parser.add_argument(
+        '--verbose', '-v', action="store_true",
+        help="verbose mode.")
+    parser.add_argument(
+        '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
+        metavar='PATH',
+        help="Output file for BPE codes (default: standard output)")
+    parser.add_argument(
+        '--symbols', '-s', type=int, default=10000,
+        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
+    parser.add_argument('--version01', '-1', action="store_true",
+                            help="learn a #version: 0.1 model (last char of word isn't forced to merge with end-of-word)")
+    parser.add_argument(
+        '--min-frequency', type=int, default=2, metavar='FREQ',
+        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
+    parser.add_argument(
+        '--write-vocabulary', '-w', type=argparse.FileType('w'), nargs = '+', default=None,
+        metavar='PATH', dest='vocab',
+        help='Write to these vocabulary files after applying BPE. One per input text. Used for filtering in apply_bpe.py')
+    parser.add_argument(
+        '--min-count,', '-c', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
+    parser.add_argument('--dict-input', action="store_true",
+                            help="If set, input file is instead of running text tokens a dictionary where each line contains a word count pair")
+    parser.add_argument('--forcecodes', '-f', default=None, metavar='PATH',
+                           help='apply these merges (--output from another learn_bpe.py) first')
+    parser.add_argument('--grepforcecodes', '-g', default=None, metavar='RE',
+                           help="use only --forcecodes A B parts that both whole-string match this regexp"
+                                "(not counting any </w> at end of B which is always allowed) e.g. [0-9]+")
+
+
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -37,38 +74,7 @@ def create_parser():
         '--input', '-i', type=argparse.FileType('r'), default=sys.stdin,
         metavar='PATH',
         help="Input text (default: standard input).")
-
-    parser.add_argument(
-        '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
-        metavar='PATH',
-        help="Output file for BPE codes (default: standard output)")
-    parser.add_argument('--forcecodes', '-f', default=None, metavar='PATH',
-                           help='apply these merges (--output from another learn_bpe.py) first')
-    parser.add_argument('--grepforcecodes', '-g', default=None, metavar='RE',
-                           help="use only --forcecodes A B parts that both whole-string match this regexp"
-                                "(not counting any </w> at end of B which is always allowed) e.g. [0-9]+")
-    parser.add_argument(
-        '--symbols', '-s', type=int, default=10000,
-        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
-    parser.add_argument('--version01', '-1', action="store_true",
-                            help="learn a #version: 0.1 model (last char of word isn't forced to merge with end-of-word)")
-    parser.add_argument(
-        '--min-frequency', type=int, default=2, metavar='FREQ',
-        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
-    parser.add_argument('--dict-input', action="store_true",
-        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
-    parser.add_argument(
-        '--min-count,', '-c', type=int, dest='mincount', default=1, help="drop from pre-bpe vocab any word with count below this")
-    parser.add_argument(
-        '--write-vocabulary', '-w', type=argparse.FileType('w'), nargs = '+', default=None,
-        metavar='PATH', dest='vocab',
-        help='Write to these vocabulary files after applying BPE. One per input text. Used for filtering in apply_bpe.py')
-    parser.add_argument(
-        '--separator', type=str, default='@@', metavar='STR',
-        help="Separator between non-final subword units (default: '%(default)s'))")
-    parser.add_argument(
-        '--verbose', '-v', action="store_true",
-        help="verbose mode.")
+    common_parser_arguments(parser)
 
     return parser
 
@@ -171,7 +177,7 @@ def update_pair_statistics(pair, changed, stats, indices):
             i += 1
 
 
-def get_pair_statistics(vocab):
+def get_pair_statistics(vocab, unkchar):
     """Count frequency of all symbol pairs, and create index"""
 
     # data structure of pair frequencies
@@ -183,8 +189,9 @@ def get_pair_statistics(vocab):
     for i, (word, freq) in enumerate(vocab):
         prev_char = word[0]
         for char in word[1:]:
-            stats[prev_char, char] += freq
-            indices[prev_char, char][i] += 1
+            if char != unkchar and prev_char != unkchar:
+                stats[prev_char, char] += freq
+                indices[prev_char, char][i] += 1
             prev_char = char
 
     return stats, indices
@@ -237,7 +244,14 @@ def prune_stats(stats, big_stats, threshold):
                 big_stats[item] = freq
 
 
-def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, version01=False, forcecodes=None, grepforcecodes=None, mincount=1):
+def main_args(args, infile, outfile, is_dict):
+    main(infile, outfile, num_symbols=args.symbols, min_frequency=args.min_frequency,
+             verbose=args.verbose, is_dict=is_dict, version01=args.version01,
+             forcecodes=args.forcecodes, grepforcecodes=args.grepforcecodes,
+             mincount=args.mincount, unkchar=args.unkchar)
+
+
+def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, version01=False, forcecodes=None, grepforcecodes=None, mincount=1, unkchar=u'\uFDEA'):
     """Learn num_symbols BPE operations from vocabulary, and write to outfile.
     """
 
@@ -249,12 +263,13 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
     endword = '</w>'
     sorted_vocab = sorted([(tuple(x)+(endword,) if version01 else tuple(x[:-1])+(x[-1]+endword,) , y) for (x,y) in vocab.items()], key=lambda x: x[1], reverse=True)
 
-    stats, indices = get_pair_statistics(sorted_vocab)
+    stats, indices = get_pair_statistics(sorted_vocab, unkchar)
     big_stats = copy.deepcopy(stats)
     # threshold is inspired by Zipfian assumption, but should only affect speed
     threshold = max(stats.values()) / 10
     ncodes = 0
     if forcecodes is not None:
+        forcecodes = codecs.open(forcecodes, encoding='UTF-8')
         grep = grepforcecodes
         def matchcode(pair, grep):
             return True if grep is None else grep.match(pair[0]) and grep.match(pair[1])
@@ -329,11 +344,7 @@ if __name__ == '__main__':
     if args.output.name != '<stdout>':
         args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
 
-    forcecodes = None
-    if args.forcecodes is not None:
-        forcecodes = codecs.open(args.forcecodes, encoding='UTF-8')
-
-    vocab = main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input, version01=args.version01, forcecodes=forcecodes, grepforcecodes=args.grepforcecodes, mincount=args.mincount)
+    vocab = main_args(args, args.input, args.output, args.dict_input)
     if len(args.vocab):
         with codecs.open(args.output.name, encoding='UTF-8') as codes:
             bpe = apply_bpe.BPE(codes, args.separator, None)
