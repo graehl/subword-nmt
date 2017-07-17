@@ -20,6 +20,10 @@ import learn_bpe
 import apply_bpe
 from collections import Counter
 
+# hack for python2/3 compatibility
+from io import open
+argparse.open = open
+
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -305,11 +305,10 @@ def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache,
     elif word[-1].endswith(endword):
         word = word[:-1] + (word[-1].replace(endword,''),)
 
-    if unktag and word == unkchar:
-        word = unkword
-    elif vocab:
+    if vocab:
         word = check_vocab_and_split(word, bpe_codes_reverse, vocab, separator)
 
+    word = [unktag if x == unkchar else x for x in word]
     cache[orig] = word
     return word
 
@@ -409,7 +408,7 @@ if __name__ == '__main__':
     else:
         vocabulary = None
 
-    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries, args.rglossaries, unkchar=args.unkchar, unktag=arcs.unktag)
+    bpe = BPE(args.codes, args.separator, vocabulary, args.glossaries, args.rglossaries, unkchar=args.unkchar, unktag=args.unktag)
 
     for line in args.input:
         args.output.write(bpe.segment(line).strip())
