@@ -36,9 +36,6 @@ def maybe_hex_int(x):
 def common_parser_arguments(parser):
     apply_bpe.common_parser_arguments(parser)
     parser.add_argument(
-        '--verbose', '-v', action="store_true",
-        help="verbose mode.")
-    parser.add_argument(
         '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
         metavar='PATH',
         help="Output file for BPE codes (default: standard output)")
@@ -108,6 +105,8 @@ def restricted_vocabulary(bpe, restrict):
     bpevocab = Counter()
     for w, c in vocab.items():
         for sw in bpe.pieces(w):
+            if sw.endswith(apply_bpe.endword):
+                sw = sw[:-4]
             bpevocab[sw] += c
     return bpevocab
 
@@ -245,10 +244,10 @@ def prune_stats(stats, big_stats, threshold):
 
 
 def main_args(args, infile, outfile, is_dict):
-    main(infile, outfile, num_symbols=args.symbols, min_frequency=args.min_frequency,
-             verbose=args.verbose, is_dict=is_dict, version01=args.version01,
-             forcecodes=args.forcecodes, grepforcecodes=args.grepforcecodes,
-             mincount=args.mincount, unkchar=args.unkchar)
+    return main(infile, outfile, num_symbols=args.symbols, min_frequency=args.min_frequency,
+                verbose=args.verbose, is_dict=is_dict, version01=args.version01,
+                forcecodes=args.forcecodes, grepforcecodes=args.grepforcecodes,
+                mincount=args.mincount, unkchar=args.unkchar)
 
 
 def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, version01=False, forcecodes=None, grepforcecodes=None, mincount=1, unkchar=u'\uFDEA'):

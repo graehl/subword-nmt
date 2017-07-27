@@ -40,7 +40,7 @@ create() {
     fi
     if [[ $joint ]] ; then
         set -x
-        python $d/learn_joint_bpe_and_vocab.py --input "$@" --separator $sep -s $subwords -o $codes --write-vocabulary $vocabs $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
+        $python3 $d/learn_joint_bpe_and_vocab.py --input "$@" --separator $sep -s $subwords -o $codes --write-vocabulary $vocabs $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
         for f in "$@"; do
             l=`lang "$f"`
             vocab=$(vocab $l)
@@ -55,7 +55,7 @@ create() {
             l=`lang "$f"`
             vocab=$(vocab $l)
             codes=$codebase.$l
-            python $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
+            $python3 $d/learn_bpe.py --input "$f" --separator $sep -s $subwords -o $codes --write-vocabulary $vocab $versionarg --min-frequency $minfreq --min-count $mincount $dictinputarg
             versionarg=$versionarg1
             ls -l $code $vocab
             if [[ $applytoo ]] ; then
@@ -67,7 +67,7 @@ create() {
 bpevocab() {
     vocab=$1
     shift
-    python -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $unkfreq "$@"
+    $python3 -u $d/apply_bpe.py -s $sep -c $codes --vocabulary $vocab --vocabulary-threshold $unkfreq "$@"
 }
 apply() {
     for f in "$@"; do

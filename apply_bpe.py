@@ -31,6 +31,7 @@ def common_parser_arguments(parser):
     parser.add_argument('--unkchar', type=unicodeutf8,
                             default=u'\uFDEA', metavar='utf8',
                             help="a unicode (utf8) codepoint character that will never participate in merges. default is U+FDEA (hex), a private noncharacter")
+    parser.add_argument('--verbose', '-v', type=int, default=0, help="higher = more ### stderr msgs")
     parser.add_argument(
         '--separator', type=str, default='@@', metavar='STR',
         help="Separator between non-final subword units (default: '%(default)s'))")
@@ -232,7 +233,6 @@ def create_parser():
         help="Glossaries. The (python 're') regexes provided in glossaries will not be affected"+
              "by the BPE (i.e. they will neither be broken into subwords, nor concatenated with other subwords."+ "If glossaries/rglossaries are ambiguous, know that they form a single regexp (glossaries ..."+ "rglossaries) in that order, and are resolved by re.split (so probably winner is "+
              "earliest-in-string match with ties broken by earliest-in-list.")
-    parser.add_argument('--verbose', '-v', type=int, default=0, help="higher = more ### stderr msgs")
 
     return parser
 
@@ -250,7 +250,7 @@ def get_pairs(word):
     return pairs
 
 
-def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache, unkchar=u'U', unktag='<unk>'):
+def encode(orig, bpe_codes, bpe_codes_reverse, vocab, separator, version, cache, unkchar=u'\uFDEA', unktag='<unk>'):
     """Encode word based on list of BPE merge operations, which are applied consecutively
     """
 

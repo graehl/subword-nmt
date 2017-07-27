@@ -35,7 +35,7 @@ def create_parser():
         metavar='PATH',
         help="running or vocab text input file (default: standard input).")
     parser.add_argument(
-        '--input-is-vocab', '-v', type=bool, dest='dict_input', default=True)
+        '--input-is-vocab', '-V', type=bool, dest='dict_input', default=True)
     parser.add_argument(
         '--codes', '-c', type=argparse.FileType('r'), metavar='PATH',
         required=True,
@@ -52,8 +52,8 @@ def main(args):
     assert isinstance(vocab, Counter)
     bpe = apply_bpe.BPE(args.codes, args.separator, vocab=None, unkchar=args.unkchar, unktag=args.unktag)
     bpevocab = learn_bpe.restricted_vocabulary(bpe, vocab)
-    if args.bpevocab is not None: learn_bpe.write_vocabulary(bpevocab, args.bpevocab)
     if args.outcodes is not None: bpe.write_subset(args.outcodes, bpevocab)
+    if args.bpevocab is not None: learn_bpe.write_vocabulary(bpevocab, args.bpevocab)
 
 if __name__ == '__main__':
     # python 2/3 compatibility
